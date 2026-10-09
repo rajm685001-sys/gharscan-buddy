@@ -306,19 +306,22 @@ export default function HomePage() {
           </p>
 
           <nav className="flex flex-wrap gap-5 font-bold">
-            <Link href="/faq" className="hover:text-foreground">
-              FAQ
-            </Link>
-            <Link href="/privacy" className="hover:text-foreground">
-              Privacy
-            </Link>
-            <Link href="/login" className="hover:text-foreground">
-              Log in
-            </Link>
-            <Link href="/signup" className="hover:text-foreground">
-              Create an account
-            </Link>
-          </nav>
+  <Link href="/faq" className="hover:text-foreground">
+    FAQ
+  </Link>
+  <Link href="/privacy" className="hover:text-foreground">
+    Privacy
+  </Link>
+  <Link href="/contact" className="hover:text-foreground">
+    Contact
+  </Link>
+  <Link href="/login" className="hover:text-foreground">
+    Log in
+  </Link>
+  <Link href="/signup" className="hover:text-foreground">
+    Create an account
+  </Link>
+</nav>
         </div>
       </footer>
     </main>
