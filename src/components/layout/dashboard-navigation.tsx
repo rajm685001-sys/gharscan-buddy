@@ -91,10 +91,15 @@ const navigationItems: NavigationItem[] = [
     href: "/analytics",
     icon: BarChart3,
   },
-  {
+   {
     label: "Settings",
     href: "/settings",
     icon: Settings,
+  },
+  {
+    label: "Contact",
+    href: "/contact",
+    icon: FileText,
   },
 ];
 
