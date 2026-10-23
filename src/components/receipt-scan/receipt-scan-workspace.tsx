@@ -21,6 +21,7 @@ type ReceiptItem = {
   quantity: string;
   unitPrice: string;
   totalPrice: string;
+  expiryDate: string;
 };
 
 type ReceiptScanResult = {
@@ -141,6 +142,7 @@ export function ReceiptScanWorkspace({ userId }: { userId: string }) {
             quantity: "1",
             unitPrice: "",
             totalPrice: "",
+            expiryDate: "",
           },
         ],
       };
@@ -168,7 +170,19 @@ export function ReceiptScanWorkspace({ userId }: { userId: string }) {
       });
 
       const data = (await response.json()) as {
-        result?: ReceiptScanResult;
+        result?: {
+          storeName?: string;
+          purchaseDate?: string;
+          receiptTotal?: string;
+          items?: {
+            name?: string;
+            quantity?: string | number;
+            unitPrice?: string | number;
+            lineTotal?: string | number;
+            expiryDate?: string;
+          }[];
+          warnings?: string[];
+        };
         error?: string;
       };
 
@@ -179,7 +193,25 @@ export function ReceiptScanWorkspace({ userId }: { userId: string }) {
         );
       }
 
-      setResult(data.result);
+      const scannedItems = (data.result.items ?? []).map((item) => ({
+        name: item.name ?? "",
+        quantity: String(item.quantity ?? "1"),
+        unitPrice: String(item.unitPrice ?? ""),
+        totalPrice: String(item.lineTotal ?? ""),
+        expiryDate: item.expiryDate ?? "",
+      }));
+
+      setResult({
+        storeName: data.result.storeName ?? "",
+        receiptDate: data.result.purchaseDate ?? "",
+        receiptNumber: "",
+        items: scannedItems,
+        subtotal: "",
+        tax: "",
+        total: data.result.receiptTotal ?? "",
+        confidence: 0,
+        warnings: data.result.warnings ?? [],
+      });
     } catch (error) {
       setErrorMessage(
         error instanceof Error
@@ -253,8 +285,8 @@ export function ReceiptScanWorkspace({ userId }: { userId: string }) {
               </h1>
 
               <p className="mt-2 max-w-2xl text-sm leading-6 text-muted-foreground">
-                Upload one clear receipt image. Review the extracted items,
-                correct anything wrong, then save them into your inventory.
+                Upload one clear receipt image. Add expiry dates for perishable
+                items, review everything, then save them to inventory.
               </p>
             </div>
 
@@ -346,10 +378,7 @@ export function ReceiptScanWorkspace({ userId }: { userId: string }) {
                     className="h-4 w-4 animate-spin"
                     aria-hidden="true"
                   />
-                  <>
-  <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
-  Reading receipt… This can take 10–30 seconds.
-</>
+                  Reading receipt… This can take 10–30 seconds.
                 </>
               ) : (
                 <>
@@ -458,6 +487,21 @@ export function ReceiptScanWorkspace({ userId }: { userId: string }) {
                           className="h-11 w-full border border-input bg-background px-3 text-sm"
                         />
                       </div>
+
+                      <label className="mt-3 block">
+                        <span className="text-xs font-bold text-muted-foreground">
+                          Expiry date (optional)
+                        </span>
+
+                        <input
+                          type="date"
+                          value={item.expiryDate}
+                          onChange={(event) =>
+                            updateItem(index, "expiryDate", event.target.value)
+                          }
+                          className="mt-1 h-11 w-full border border-input bg-background px-3 text-sm"
+                        />
+                      </label>
                     </div>
                   ))}
                 </div>
