@@ -19,7 +19,7 @@ import { usePathname } from "next/navigation";
 import { NotificationBell } from "@/components/layout/notification-bell";
 
 type DashboardNavigationProps = {
-  familyId: string;
+  familyId?: string;
   familyName: string;
   familyCode: string;
 };
@@ -107,7 +107,9 @@ export function DashboardNavigation({
         </Link>
 
         <div className="mt-4 flex items-center justify-between">
-          <NotificationBell familyId={familyId} />
+          {familyId ? (
+  <NotificationBell familyId={familyId} />
+) : null}
 
           <span className="rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1 text-xs font-bold text-emerald-700 dark:border-emerald-950 dark:bg-emerald-950/40 dark:text-emerald-300">
             Active

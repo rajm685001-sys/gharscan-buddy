@@ -2,7 +2,7 @@ import type { Metadata, Viewport } from "next";
 import { Inter } from "next/font/google";
 
 import { ThemeProvider } from "@/providers/theme-provider";
-
+import { PwaRegister } from "@/components/pwa-register";
 import "./globals.css";
 
 const inter = Inter({
@@ -81,6 +81,7 @@ export default function RootLayout({
       <body
         className={`${inter.variable} min-h-screen bg-background font-sans text-foreground antialiased`}
       >
+        <PwaRegister />
         <ThemeProvider
           attribute="class"
           defaultTheme="system"
