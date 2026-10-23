@@ -159,7 +159,7 @@ export function ReceiptScanWorkspace({ userId }: { userId: string }) {
     setSavedCount(0);
 
     const formData = new FormData();
-    formData.append("receipt", selectedFile);
+    formData.append("image", selectedFile);
 
     try {
       const response = await fetch("/api/scan-receipt", {
