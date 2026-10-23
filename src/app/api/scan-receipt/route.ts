@@ -277,7 +277,7 @@ ${units.join(", ")}
 `;
 
     const response = await ai.models.generateContent({
-      model: "gemini-3.8-flash",
+      model: "gemini-flash-lite-latest",
       contents: [
         {
           role: "user",
