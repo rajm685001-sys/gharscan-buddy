@@ -1,5 +1,6 @@
 "use client";
 
+
 import {
   AlertCircle,
   ArrowLeft,
@@ -18,6 +19,7 @@ import {
 import Link from "next/link";
 import { ChangeEvent, useEffect, useState } from "react";
 
+
 import { DashboardNavigation } from "@/components/layout/dashboard-navigation";
 import { LiveCameraScanner } from "@/components/scanner/live-camera-scanner";
 import {
@@ -33,6 +35,7 @@ import type {
   StorageLocation,
 } from "@/types/inventory";
 
+
 type ScanWorkspaceProps = {
   familyId: string;
   familyName: string;
@@ -41,7 +44,9 @@ type ScanWorkspaceProps = {
   userRole: "owner" | "editor" | "viewer";
 };
 
+
 type ScanStage = "upload" | "analyzing" | "review" | "saved";
+
 
 export function ScanWorkspace({
   familyId,
@@ -58,8 +63,12 @@ export function ScanWorkspace({
   const [errorMessage, setErrorMessage] = useState("");
   const [isSaving, setIsSaving] = useState(false);
   const [cameraOpen, setCameraOpen] = useState(false);
+  const [ollamaFallbackAvailable, setOllamaFallbackAvailable] = useState(false);
+  const [isUsingOllama, setIsUsingOllama] = useState(false);
+
 
   const canEdit = userRole === "owner" || userRole === "editor";
+
 
   useEffect(() => {
     return () => {
@@ -69,11 +78,13 @@ export function ScanWorkspace({
     };
   }, [previewUrl]);
 
+
   function releasePreview() {
     if (previewUrl) {
       URL.revokeObjectURL(previewUrl);
     }
   }
+
 
   function resetScanner() {
     releasePreview();
@@ -85,24 +96,32 @@ export function ScanWorkspace({
     setErrorMessage("");
     setIsSaving(false);
     setCameraOpen(false);
+    setOllamaFallbackAvailable(false);
+    setIsUsingOllama(false);
   }
+
 
   function selectImageFile(file: File, barcode = "") {
     const supportedTypes = ["image/jpeg", "image/png", "image/webp"];
+
 
     if (!supportedTypes.includes(file.type)) {
       setErrorMessage("Please choose a JPG, PNG, or WebP image.");
       return;
     }
 
+
     if (file.size > 5 * 1024 * 1024) {
       setErrorMessage("Image must be smaller than 5 MB.");
       return;
     }
 
+
     releasePreview();
     setErrorMessage("");
     setResult(null);
+    setOllamaFallbackAvailable(false);
+    setIsUsingOllama(false);
     setSelectedFile(file);
     setPreviewUrl(URL.createObjectURL(file));
     setDetectedBarcode(barcode);
@@ -110,16 +129,20 @@ export function ScanWorkspace({
     setStage("upload");
   }
 
+
   function handleFileChange(event: ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0];
+
 
     if (!file) {
       return;
     }
 
+
     selectImageFile(file);
     event.target.value = "";
   }
+
 
   async function analyzeProduct() {
     if (!selectedFile) {
@@ -127,30 +150,50 @@ export function ScanWorkspace({
       return;
     }
 
+
     setErrorMessage("");
+    setOllamaFallbackAvailable(false);
+    setIsUsingOllama(false);
     setStage("analyzing");
 
-    try {
-      const formData = new FormData();
-      formData.append("image", selectedFile);
-      formData.append("barcode", detectedBarcode);
 
+    const formData = new FormData();
+    formData.append("image", selectedFile);
+    formData.append("barcode", detectedBarcode);
+
+
+    try {
       const response = await fetch("/api/scan-product", {
         method: "POST",
         body: formData,
       });
+
 
       const data = (await response.json()) as {
         result?: AiScanResult;
         error?: string;
       };
 
+
       if (!response.ok || !data.result) {
+        if (response.status === 429 || response.status === 503) {
+          setOllamaFallbackAvailable(true);
+          setErrorMessage(
+            "Gemini is unavailable or its usage limit was reached. You can try the local Ollama scanner if this device is on the same Wi-Fi as the computer running Ollama.",
+          );
+          setStage("upload");
+
+
+          return;
+        }
+
+
         throw new Error(
           data.error ??
             "Unable to analyze this product. Try a closer and brighter image.",
         );
       }
+
 
       setResult(data.result);
       setStage("review");
@@ -164,6 +207,60 @@ export function ScanWorkspace({
     }
   }
 
+
+  async function analyzeProductWithOllama() {
+    if (!selectedFile) {
+      setErrorMessage("Open the camera or choose a product image first.");
+      return;
+    }
+
+
+    setErrorMessage("");
+    setIsUsingOllama(true);
+    setStage("analyzing");
+
+
+    const formData = new FormData();
+    formData.append("image", selectedFile);
+    formData.append("barcode", detectedBarcode);
+
+
+    try {
+      const response = await fetch("/api/scan-product-local", {
+        method: "POST",
+        body: formData,
+      });
+
+
+      const data = (await response.json()) as {
+        result?: AiScanResult;
+        error?: string;
+      };
+
+
+      if (!response.ok || !data.result) {
+        throw new Error(
+          data.error ??
+            "Unable to scan using local Ollama. Ensure Ollama is running and this device can reach it.",
+        );
+      }
+
+
+      setResult(data.result);
+      setStage("review");
+    } catch (error) {
+      setErrorMessage(
+        error instanceof Error
+          ? error.message
+          : "Unable to scan using local Ollama.",
+      );
+      setStage("upload");
+    } finally {
+      setIsUsingOllama(false);
+    }
+  }
+
+
   function updateResult<Key extends keyof AiScanResult>(
     key: Key,
     value: AiScanResult[Key],
@@ -173,15 +270,19 @@ export function ScanWorkspace({
     );
   }
 
+
   async function uploadScannedImage(file: File) {
     const supabase = createClient();
+
 
     const safeFileName = file.name
       .toLowerCase()
       .replace(/[^a-z0-9.-]/g, "-")
       .replace(/-+/g, "-");
 
+
     const imagePath = `${familyId}/${userId}/ai-scan-${Date.now()}-${safeFileName}`;
+
 
     const { error } = await supabase.storage
       .from("inventory-images")
@@ -191,32 +292,40 @@ export function ScanWorkspace({
         contentType: file.type,
       });
 
+
     if (error) {
       throw new Error(error.message);
     }
 
+
     return imagePath;
   }
+
 
   async function saveToInventory() {
     if (!result || !canEdit) {
       return;
     }
 
+
     if (!result.name.trim()) {
       setErrorMessage("Item name is required before saving.");
       return;
     }
 
+
     setErrorMessage("");
     setIsSaving(true);
 
+
     let imagePath: string | null = null;
+
 
     try {
       if (selectedFile) {
         imagePath = await uploadScannedImage(selectedFile);
       }
+
 
       const combinedNotes = [
         result.notes.trim(),
@@ -232,7 +341,9 @@ export function ScanWorkspace({
         .filter(Boolean)
         .join("\n");
 
+
       const supabase = createClient();
+
 
       const { error } = await supabase.from("inventory_items").insert({
         family_id: familyId,
@@ -252,13 +363,16 @@ export function ScanWorkspace({
         updated_by: userId,
       });
 
+
       if (error) {
         if (imagePath) {
           await supabase.storage.from("inventory-images").remove([imagePath]);
         }
 
+
         throw new Error(error.message);
       }
+
 
       setStage("saved");
     } catch (error) {
@@ -271,12 +385,14 @@ export function ScanWorkspace({
     }
   }
 
+
   return (
     <div className="min-h-screen bg-background">
       <DashboardNavigation
         familyName={familyName}
         familyCode={familyCode}
       />
+
 
       <main className="pb-24 lg:ml-72 lg:pb-8">
         <div className="mx-auto max-w-6xl px-4 py-7 sm:px-6 lg:px-8">
@@ -288,9 +404,11 @@ export function ScanWorkspace({
                   Product scanner
                 </p>
 
+
                 <h1 className="mt-2 text-3xl font-black tracking-tight text-foreground">
                   Scan a product live
                 </h1>
+
 
                 <p className="mt-2 max-w-2xl text-sm leading-6 text-muted-foreground">
                   Open your camera, aim at a product label, capture one clear
@@ -299,12 +417,14 @@ export function ScanWorkspace({
                 </p>
               </div>
 
+
               <Link href="/inventory" className="button-secondary h-11">
                 <ArrowLeft className="h-4 w-4" aria-hidden="true" />
                 Back to inventory
               </Link>
             </div>
           </header>
+
 
           {!canEdit && (
             <div className="mt-6 flex gap-3 border border-sky-200 bg-sky-50 p-4 text-sm text-sky-800 dark:border-sky-950 dark:bg-sky-950/30 dark:text-sky-200">
@@ -313,6 +433,7 @@ export function ScanWorkspace({
                 aria-hidden="true"
               />
 
+
               <p>
                 You have viewer access. You may explore scanning, but only an
                 Owner or Editor can save scanned details into inventory.
@@ -320,16 +441,46 @@ export function ScanWorkspace({
             </div>
           )}
 
-          {errorMessage && (
-            <div className="mt-6 flex gap-3 border border-red-200 bg-red-50 p-4 text-sm text-red-700 dark:border-red-950 dark:bg-red-950/40 dark:text-red-300">
-              <AlertCircle
-                className="mt-0.5 h-4 w-4 shrink-0"
-                aria-hidden="true"
-              />
 
-              <p>{errorMessage}</p>
+          {errorMessage && (
+            <div className="mt-6 space-y-3 border border-red-200 bg-red-50 p-4 text-sm text-red-700 dark:border-red-950 dark:bg-red-950/40 dark:text-red-300">
+              <div className="flex gap-3">
+                <AlertCircle
+                  className="mt-0.5 h-4 w-4 shrink-0"
+                  aria-hidden="true"
+                />
+
+
+                <p>{errorMessage}</p>
+              </div>
+
+
+              {ollamaFallbackAvailable && (
+                <button
+                  type="button"
+                  onClick={analyzeProductWithOllama}
+                  disabled={isUsingOllama}
+                  className="inline-flex h-11 items-center justify-center gap-2 rounded-xl border border-red-300 bg-white px-4 text-sm font-bold text-slate-900 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  {isUsingOllama ? (
+                    <>
+                      <Loader2
+                        className="h-4 w-4 animate-spin"
+                        aria-hidden="true"
+                      />
+                      Scanning with local Ollama…
+                    </>
+                  ) : (
+                    <>
+                      <ScanLine className="h-4 w-4" aria-hidden="true" />
+                      Try local Ollama scanner
+                    </>
+                  )}
+                </button>
+              )}
             </div>
           )}
+
 
           {stage === "upload" && (
             <section className="mt-7 grid gap-6 lg:grid-cols-[1.15fr_0.85fr]">
@@ -339,16 +490,19 @@ export function ScanWorkspace({
                     <ScanLine className="h-5 w-5" aria-hidden="true" />
                   </span>
 
+
                   <div>
                     <h2 className="font-black text-foreground">
                       Camera-first product scanner
                     </h2>
+
 
                     <p className="mt-1 text-sm text-muted-foreground">
                       Capture a clear label image for the best extraction result.
                     </p>
                   </div>
                 </div>
+
 
                 {previewUrl ? (
                   <div className="relative mt-6 overflow-hidden border border-border bg-muted">
@@ -359,6 +513,7 @@ export function ScanWorkspace({
                       className="h-80 w-full object-cover"
                     />
 
+
                     <button
                       type="button"
                       onClick={resetScanner}
@@ -367,6 +522,7 @@ export function ScanWorkspace({
                     >
                       <X className="h-5 w-5" aria-hidden="true" />
                     </button>
+
 
                     {detectedBarcode && (
                       <div className="absolute bottom-4 left-4 inline-flex items-center gap-2 border border-white/20 bg-slate-950/75 px-3 py-2 text-xs font-bold text-white backdrop-blur">
@@ -385,9 +541,11 @@ export function ScanWorkspace({
                         <Camera className="h-7 w-7" aria-hidden="true" />
                       </span>
 
+
                       <p className="mt-5 text-base font-black text-foreground">
                         Scan a product using your camera
                       </p>
+
 
                       <p className="mt-2 max-w-sm text-sm leading-6 text-muted-foreground">
                         Position the product label, expiry text, and barcode
@@ -396,6 +554,7 @@ export function ScanWorkspace({
                     </div>
                   </div>
                 )}
+
 
                 <div className="mt-6 grid gap-3 sm:grid-cols-2">
                   <button
@@ -407,9 +566,11 @@ export function ScanWorkspace({
                     Open live camera
                   </button>
 
+
                   <label className="button-secondary h-12 cursor-pointer px-5">
                     <ImagePlus className="h-4 w-4" aria-hidden="true" />
                     Upload image
+
 
                     <input
                       type="file"
@@ -419,6 +580,7 @@ export function ScanWorkspace({
                     />
                   </label>
                 </div>
+
 
                 <button
                   type="button"
@@ -431,11 +593,13 @@ export function ScanWorkspace({
                 </button>
               </article>
 
+
               <aside className="space-y-5">
                 <article className="border border-border bg-card p-6 shadow-sm">
                   <p className="text-sm font-black text-foreground">
                     Better scanning results
                   </p>
+
 
                   <div className="mt-5 space-y-4">
                     {[
@@ -460,16 +624,19 @@ export function ScanWorkspace({
                     ].map((item) => {
                       const Icon = item.icon;
 
+
                       return (
                         <div key={item.title} className="flex gap-3">
                           <span className="flex h-10 w-10 shrink-0 items-center justify-center bg-muted text-emerald-600 dark:text-emerald-400">
                             <Icon className="h-4 w-4" aria-hidden="true" />
                           </span>
 
+
                           <div>
                             <p className="text-sm font-bold text-foreground">
                               {item.title}
                             </p>
+
 
                             <p className="mt-1 text-xs leading-5 text-muted-foreground">
                               {item.description}
@@ -481,8 +648,10 @@ export function ScanWorkspace({
                   </div>
                 </article>
 
+
                 <article className="border border-amber-200 bg-amber-50 p-5 text-sm leading-6 text-amber-800 dark:border-amber-950 dark:bg-amber-950/25 dark:text-amber-200">
                   <p className="font-black">Usage note</p>
+
 
                   <p className="mt-2">
                     The scanner sends one captured frame for analysis instead
@@ -494,6 +663,7 @@ export function ScanWorkspace({
             </section>
           )}
 
+
           {stage === "analyzing" && (
             <section className="mt-7 flex min-h-[480px] items-center justify-center border border-border bg-card p-6 shadow-sm">
               <div className="max-w-md text-center">
@@ -501,14 +671,18 @@ export function ScanWorkspace({
                   <Loader2 className="h-9 w-9 animate-spin" aria-hidden="true" />
                 </span>
 
+
                 <p className="mt-8 text-2xl font-black text-foreground">
                   Reading the product label
                 </p>
 
+
                 <p className="mt-3 text-sm leading-6 text-muted-foreground">
-                  Extracting product name, brand, category, quantity, expiry,
-                  batch information, price, and visible barcode.
+                  {isUsingOllama
+                    ? "Using your local Ollama model to extract product details."
+                    : "Extracting product name, brand, category, quantity, expiry, batch information, price, and visible barcode."}
                 </p>
+
 
                 <div className="mt-7 h-2 overflow-hidden bg-muted">
                   <div className="h-full w-2/3 bg-emerald-500" />
@@ -516,6 +690,7 @@ export function ScanWorkspace({
               </div>
             </section>
           )}
+
 
           {stage === "review" && result && (
             <section className="mt-7 grid gap-6 xl:grid-cols-[0.78fr_1.22fr]">
@@ -534,6 +709,7 @@ export function ScanWorkspace({
                     </div>
                   )}
 
+
                   <div className="p-5">
                     <div className="flex items-center gap-2">
                       <Sparkles
@@ -541,10 +717,12 @@ export function ScanWorkspace({
                         aria-hidden="true"
                       />
 
+
                       <p className="text-sm font-black text-foreground">
                         Extraction complete
                       </p>
                     </div>
+
 
                     <p className="mt-2 text-sm leading-6 text-muted-foreground">
                       Confidence score:{" "}
@@ -554,6 +732,7 @@ export function ScanWorkspace({
                     </p>
                   </div>
                 </article>
+
 
                 {result.barcode && (
                   <article className="border border-border bg-card p-5 shadow-sm">
@@ -565,11 +744,13 @@ export function ScanWorkspace({
                       Barcode
                     </p>
 
+
                     <p className="mt-3 break-all bg-muted px-3 py-2 font-mono text-sm font-bold text-foreground">
                       {result.barcode}
                     </p>
                   </article>
                 )}
+
 
                 {result.detectedText.length > 0 && (
                   <article className="border border-border bg-card p-5 shadow-sm">
@@ -580,6 +761,7 @@ export function ScanWorkspace({
                       />
                       Detected label text
                     </p>
+
 
                     <div className="mt-4 space-y-2">
                       {result.detectedText.map((text) => (
@@ -594,6 +776,7 @@ export function ScanWorkspace({
                   </article>
                 )}
 
+
                 {result.warnings.length > 0 && (
                   <article className="border border-amber-200 bg-amber-50 p-5 shadow-sm dark:border-amber-950 dark:bg-amber-950/25">
                     <p className="flex items-center gap-2 text-sm font-black text-amber-800 dark:text-amber-200">
@@ -604,6 +787,7 @@ export function ScanWorkspace({
                       Review warnings
                     </p>
 
+
                     <ul className="mt-3 space-y-2 text-xs leading-5 text-amber-700 dark:text-amber-300">
                       {result.warnings.map((warning) => (
                         <li key={warning}>• {warning}</li>
@@ -613,6 +797,7 @@ export function ScanWorkspace({
                 )}
               </aside>
 
+
               <article className="border border-border bg-card p-5 shadow-sm sm:p-7">
                 <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                   <div>
@@ -620,15 +805,18 @@ export function ScanWorkspace({
                       Review before saving
                     </p>
 
+
                     <h2 className="mt-2 text-2xl font-black text-foreground">
                       Confirm extracted details
                     </h2>
+
 
                     <p className="mt-2 text-sm leading-6 text-muted-foreground">
                       Check and correct all information before it is saved into
                       your secure family inventory.
                     </p>
                   </div>
+
 
                   <button
                     type="button"
@@ -640,11 +828,13 @@ export function ScanWorkspace({
                   </button>
                 </div>
 
+
                 <div className="mt-7 grid gap-5 sm:grid-cols-2">
                   <label className="space-y-2 sm:col-span-2">
                     <span className="text-sm font-bold text-foreground">
                       Item name
                     </span>
+
 
                     <input
                       type="text"
@@ -656,10 +846,12 @@ export function ScanWorkspace({
                     />
                   </label>
 
+
                   <label className="space-y-2">
                     <span className="text-sm font-bold text-foreground">
                       Brand
                     </span>
+
 
                     <input
                       type="text"
@@ -671,10 +863,12 @@ export function ScanWorkspace({
                     />
                   </label>
 
+
                   <label className="space-y-2">
                     <span className="text-sm font-bold text-foreground">
                       Category
                     </span>
+
 
                     <select
                       value={result.category}
@@ -694,10 +888,12 @@ export function ScanWorkspace({
                     </select>
                   </label>
 
+
                   <label className="space-y-2">
                     <span className="text-sm font-bold text-foreground">
                       Storage location
                     </span>
+
 
                     <select
                       value={result.storageLocation}
@@ -717,10 +913,12 @@ export function ScanWorkspace({
                     </select>
                   </label>
 
+
                   <label className="space-y-2">
                     <span className="text-sm font-bold text-foreground">
                       Quantity
                     </span>
+
 
                     <input
                       type="number"
@@ -734,10 +932,12 @@ export function ScanWorkspace({
                     />
                   </label>
 
+
                   <label className="space-y-2">
                     <span className="text-sm font-bold text-foreground">
                       Unit
                     </span>
+
 
                     <select
                       value={result.unit}
@@ -757,10 +957,12 @@ export function ScanWorkspace({
                     </select>
                   </label>
 
+
                   <label className="space-y-2">
                     <span className="text-sm font-bold text-foreground">
                       Expiry / best-before date
                     </span>
+
 
                     <input
                       type="date"
@@ -772,10 +974,12 @@ export function ScanWorkspace({
                     />
                   </label>
 
+
                   <label className="space-y-2">
                     <span className="text-sm font-bold text-foreground">
                       Price (₹)
                     </span>
+
 
                     <input
                       type="number"
@@ -790,10 +994,12 @@ export function ScanWorkspace({
                     />
                   </label>
 
+
                   <label className="space-y-2">
                     <span className="text-sm font-bold text-foreground">
                       Batch number
                     </span>
+
 
                     <input
                       type="text"
@@ -806,10 +1012,12 @@ export function ScanWorkspace({
                     />
                   </label>
 
+
                   <label className="space-y-2">
                     <span className="text-sm font-bold text-foreground">
                       Manufacture date
                     </span>
+
 
                     <input
                       type="date"
@@ -821,10 +1029,12 @@ export function ScanWorkspace({
                     />
                   </label>
 
+
                   <label className="space-y-2 sm:col-span-2">
                     <span className="text-sm font-bold text-foreground">
                       Notes
                     </span>
+
 
                     <textarea
                       value={result.notes}
@@ -837,6 +1047,7 @@ export function ScanWorkspace({
                   </label>
                 </div>
 
+
                 <div className="mt-7 flex flex-col-reverse gap-3 border-t border-border pt-5 sm:flex-row sm:justify-end">
                   <button
                     type="button"
@@ -846,6 +1057,7 @@ export function ScanWorkspace({
                   >
                     Discard scan
                   </button>
+
 
                   <button
                     type="button"
@@ -873,6 +1085,7 @@ export function ScanWorkspace({
             </section>
           )}
 
+
           {stage === "saved" && (
             <section className="mt-7 flex min-h-[480px] items-center justify-center border border-border bg-card p-6 text-center shadow-sm">
               <div className="max-w-md">
@@ -880,14 +1093,17 @@ export function ScanWorkspace({
                   <Check className="h-10 w-10" aria-hidden="true" />
                 </span>
 
+
                 <h2 className="mt-7 text-3xl font-black text-foreground">
                   Scanned item saved
                 </h2>
+
 
                 <p className="mt-3 text-sm leading-6 text-muted-foreground">
                   The product is now stored in your family inventory. GharScan
                   Buddy will track its quantity, stock status, and expiry date.
                 </p>
+
 
                 <div className="mt-8 flex flex-col justify-center gap-3 sm:flex-row">
                   <Link
@@ -897,6 +1113,7 @@ export function ScanWorkspace({
                     View inventory
                     <ArrowRight className="h-4 w-4" aria-hidden="true" />
                   </Link>
+
 
                   <button
                     type="button"
@@ -912,6 +1129,7 @@ export function ScanWorkspace({
           )}
         </div>
       </main>
+
 
       {cameraOpen && (
         <LiveCameraScanner
