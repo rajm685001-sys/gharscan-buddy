@@ -7,6 +7,7 @@ import { createClient } from "@/lib/supabase/client";
 
 type Notification = {
   id: string;
+  family_id: string;
   title: string;
   message: string;
   type: "expiry_warning" | "expired";
@@ -19,9 +20,9 @@ export function NotificationBell({ familyId }: { familyId: string }) {
   const [isOpen, setIsOpen] = useState(false);
 
   useEffect(() => {
-    async function loadNotifications() {
-      const supabase = createClient();
+    const supabase = createClient();
 
+    async function loadNotifications() {
       const { data } = await supabase
         .from("notifications")
         .select("*")
@@ -34,6 +35,58 @@ export function NotificationBell({ familyId }: { familyId: string }) {
     }
 
     loadNotifications();
+
+    const channel = supabase
+      .channel(`notifications-${familyId}`)
+      .on(
+        "postgres_changes",
+        {
+          event: "INSERT",
+          schema: "public",
+          table: "notifications",
+          filter: `family_id=eq.${familyId}`,
+        },
+        (payload) => {
+          const newNotification = payload.new as Notification;
+
+          setNotifications((current) => [
+            newNotification,
+            ...current.filter(
+              (notification) => notification.id !== newNotification.id,
+            ),
+          ]);
+        },
+      )
+      .on(
+        "postgres_changes",
+        {
+          event: "UPDATE",
+          schema: "public",
+          table: "notifications",
+          filter: `family_id=eq.${familyId}`,
+        },
+        (payload) => {
+          const updatedNotification = payload.new as Notification;
+
+          setNotifications((current) =>
+            updatedNotification.is_read
+              ? current.filter(
+                  (notification) =>
+                    notification.id !== updatedNotification.id,
+                )
+              : current.map((notification) =>
+                  notification.id === updatedNotification.id
+                    ? updatedNotification
+                    : notification,
+                ),
+          );
+        },
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
   }, [familyId]);
 
   async function markAsRead(notificationId: string) {
@@ -43,12 +96,6 @@ export function NotificationBell({ familyId }: { familyId: string }) {
       .from("notifications")
       .update({ is_read: true })
       .eq("id", notificationId);
-
-    setNotifications((current) =>
-      current.filter(
-        (notification) => notification.id !== notificationId,
-      ),
-    );
   }
 
   const unreadCount = notifications.length;
